@@ -1,0 +1,181 @@
+MODULE main
+
+VAR
+  a : 0..7;
+  src_pc : 0..9;
+  opt_pc : 0..6;
+  src_step : 0..32;
+  opt_step : 0..32;
+  src_done : boolean;
+  opt_done : boolean;
+  src_trap : boolean;
+  opt_trap : boolean;
+  src_out : 0..7;
+  opt_out : 0..7;
+  src_timeout : boolean;
+  opt_timeout : boolean;
+  src_t0 : 0..7;
+  src_t1 : 0..7;
+  src_t2 : 0..7;
+  opt_t0 : 0..7;
+  opt_t1 : 0..7;
+
+ASSIGN
+  init(src_pc) := 0;
+  init(opt_pc) := 0;
+  init(src_step) := 0;
+  init(opt_step) := 0;
+  init(src_done) := FALSE;
+  init(opt_done) := FALSE;
+  init(src_trap) := FALSE;
+  init(opt_trap) := FALSE;
+  init(src_out) := 0;
+  init(opt_out) := 0;
+  init(src_timeout) := FALSE;
+  init(opt_timeout) := FALSE;
+  init(a) := {0,7};
+  init(src_t0) := 0;
+  init(src_t1) := 0;
+  init(src_t2) := 0;
+  init(opt_t0) := 0;
+  init(opt_t1) := 0;
+  next(a) := a;
+  next(src_pc) :=
+    case
+      src_done | src_trap | src_timeout : src_pc;
+      src_pc = 0 : 1;
+      src_pc = 1 : 2;
+      src_pc = 2 : case src_t0 != 0 : 3; TRUE : 6; esac;
+      src_pc = 3 : 4;
+      src_pc = 4 : 5;
+      src_pc = 5 : 9;
+      src_pc = 6 : 7;
+      src_pc = 7 : 8;
+      src_pc = 8 : 9;
+      TRUE : 9;
+    esac;
+  next(src_done) :=
+    case
+      src_done : TRUE;
+      src_pc = 5 : TRUE;
+      src_pc = 8 : TRUE;
+      src_pc = 9 : TRUE;
+      TRUE : FALSE;
+    esac;
+  next(src_trap) :=
+    case
+      src_trap : TRUE;
+      TRUE : FALSE;
+    esac;
+  next(src_out) :=
+    case
+      src_done : src_out;
+      src_pc = 5 : src_t1;
+      src_pc = 8 : src_t2;
+      src_pc = 9 : src_out;
+      TRUE : 0;
+    esac;
+  next(src_step) :=
+    case
+      src_done | src_trap | src_timeout : src_step;
+      src_pc < 9 & src_step < 32 : src_step + 1;
+      TRUE : src_step;
+    esac;
+  next(src_timeout) :=
+    case
+      src_timeout : TRUE;
+      !src_done & !src_trap & src_step >= 32 : TRUE;
+      TRUE : FALSE;
+    esac;
+  next(opt_pc) :=
+    case
+      opt_done | opt_trap | opt_timeout : opt_pc;
+      opt_pc = 0 : 1;
+      opt_pc = 1 : 2;
+      opt_pc = 2 : 3;
+      opt_pc = 3 : 4;
+      opt_pc = 4 : 5;
+      opt_pc = 5 : 6;
+      TRUE : 6;
+    esac;
+  next(opt_done) :=
+    case
+      opt_done : TRUE;
+      opt_pc = 5 : TRUE;
+      opt_pc = 6 : TRUE;
+      TRUE : FALSE;
+    esac;
+  next(opt_trap) :=
+    case
+      opt_trap : TRUE;
+      TRUE : FALSE;
+    esac;
+  next(opt_out) :=
+    case
+      opt_done : opt_out;
+      opt_pc = 5 : opt_t1;
+      opt_pc = 6 : opt_out;
+      TRUE : 0;
+    esac;
+  next(opt_step) :=
+    case
+      opt_done | opt_trap | opt_timeout : opt_step;
+      opt_pc < 6 & opt_step < 32 : opt_step + 1;
+      TRUE : opt_step;
+    esac;
+  next(opt_timeout) :=
+    case
+      opt_timeout : TRUE;
+      !opt_done & !opt_trap & opt_step >= 32 : TRUE;
+      TRUE : FALSE;
+    esac;
+  next(src_t0) :=
+    case
+      src_done | src_trap | src_timeout : src_t0;
+      src_pc = 1 : 1;
+      TRUE : src_t0;
+    esac;
+  next(src_t1) :=
+    case
+      src_done | src_trap | src_timeout : src_t1;
+      src_pc = 4 : 3;
+      TRUE : src_t1;
+    esac;
+  next(src_t2) :=
+    case
+      src_done | src_trap | src_timeout : src_t2;
+      src_pc = 7 : 4;
+      TRUE : src_t2;
+    esac;
+  next(opt_t0) :=
+    case
+      opt_done | opt_trap | opt_timeout : opt_t0;
+      opt_pc = 1 : 1;
+      TRUE : opt_t0;
+    esac;
+  next(opt_t1) :=
+    case
+      opt_done | opt_trap | opt_timeout : opt_t1;
+      opt_pc = 4 : 3;
+      TRUE : opt_t1;
+    esac;
+
+CTLSPEC NAME BothEventuallyStop :=
+  AF ((src_done | src_trap) & (opt_done | opt_trap))
+
+CTLSPEC NAME SameNormalOutput :=
+  AG ((src_done & opt_done) -> src_out = opt_out)
+
+CTLSPEC NAME SameTrapBehavior1 :=
+  AG (src_trap -> AF opt_trap)
+
+CTLSPEC NAME SameTrapBehavior2 :=
+  AG (opt_trap -> AF src_trap)
+
+CTLSPEC NAME NoMismatchAtStop :=
+  AG (((src_done | src_trap) & (opt_done | opt_trap)) ->
+      ((src_done & opt_done & src_out = opt_out) |
+       (src_trap & opt_trap)))
+
+CTLSPEC NAME NoTimeout :=
+  AG !(src_timeout | opt_timeout)

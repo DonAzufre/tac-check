@@ -1,0 +1,17 @@
+*** This is NuSMV 2.7.1 (compiled on (unknown))
+*** Enabled addons are: compass
+*** For more information on NuSMV see <http://nusmv.fbk.eu>
+*** or email to <nusmv-users@list.fbk.eu>.
+*** Please report bugs to <Please report bugs to <nusmv-users@fbk.eu>>
+
+*** Copyright (c) 2010-2026, Fondazione Bruno Kessler
+
+*** This version of NuSMV is linked to the CUDD library version 2.4.1
+*** Copyright (c) 1995-2004, Regents of the University of Colorado
+
+-- specification AG (src_trap -> AF opt_trap)  is true
+-- specification AG (opt_trap -> AF src_trap)  is true
+-- specification AF ((src_done | src_trap) & (opt_done | opt_trap))  is true
+-- specification AG !(src_timeout | opt_timeout)  is true
+-- specification AG ((src_done & opt_done) -> src_out = opt_out)  is true
+-- specification AG (((src_done | src_trap) & (opt_done | opt_trap)) -> (((src_done & opt_done) & src_out = opt_out) | (src_trap & opt_trap)))  is true
