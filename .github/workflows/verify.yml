@@ -1,0 +1,82 @@
+name: Verify TAC validation
+
+on:
+  push:
+    branches:
+      - chatgpt/verification-hardening-docs
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Download NuSMV
+        run: |
+          set -eux
+          sudo apt-get update
+          sudo apt-get install -y libedit2
+          if [ ! -e /usr/lib/x86_64-linux-gnu/libedit.so.0 ] && [ -e /usr/lib/x86_64-linux-gnu/libedit.so.2 ]; then
+            sudo ln -s /usr/lib/x86_64-linux-gnu/libedit.so.2 /usr/lib/x86_64-linux-gnu/libedit.so.0
+          fi
+          mkdir -p /tmp/nusmv
+          curl -L -o /tmp/NuSMV-2.7.1-linux64.tar.xz https://nusmv.fbk.eu/distrib/2.7.1/NuSMV-2.7.1-linux64.tar.xz
+          tar -xf /tmp/NuSMV-2.7.1-linux64.tar.xz -C /tmp/nusmv
+          NUSMV_BIN="$(find /tmp/nusmv -type f -name NuSMV -perm -u+x | head -n 1)"
+          test -n "$NUSMV_BIN"
+          ldd "$NUSMV_BIN" || true
+          echo "NUSMV_BIN=$NUSMV_BIN" >> "$GITHUB_ENV"
+          "$NUSMV_BIN" -h >/dev/null || true
+
+      - name: Python tests
+        run: python -m pytest -q
+
+      - name: Lint
+        run: make lint
+
+      - name: NuSMV verification examples
+        run: |
+          set +e
+          make verify-v1 NUSMV_BIN="$NUSMV_BIN"
+          status_v1=$?
+          make verify-bad NUSMV_BIN="$NUSMV_BIN"
+          status_bad=$?
+          echo "verify-v1 exit code: $status_v1" | tee generated/verification-status.txt
+          echo "verify-bad exit code: $status_bad" | tee -a generated/verification-status.txt
+          exit $(( status_v1 != 0 || status_bad != 0 ))
+
+      - name: Show NuSMV summaries
+        if: always()
+        run: |
+          find generated -maxdepth 3 -type f | sort || true
+          for f in generated/counterexamples/*.md; do
+            [ -e "$f" ] || continue
+            echo "===== $f ====="
+            cat "$f"
+          done
+
+      - name: Upload verification artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-artifacts
+          path: |
+            generated/**/*.smv
+            generated/**/*.log
+            generated/**/*.md
+            generated/verification-status.txt
+          if-no-files-found: ignore

@@ -160,7 +160,7 @@ class Function:
         order: list[str] = []
 
         def dfs(label: str) -> None:
-            if label in visited:
+            if label in visited or label not in self.blocks:
                 return
             visited.add(label)
             order.append(label)
@@ -173,7 +173,7 @@ class Function:
                 order.append(label)
         return order
 
-    def flatten_instructions(self) -> list[tuple[int, Instruction, str]]:
+    def flatten_instructions(self) -> tuple[list[tuple[int, Instruction, str]], dict[str, int]]:
         result: list[tuple[int, Instruction, str]] = []
         idx = 0
         label_map: dict[str, int] = {}

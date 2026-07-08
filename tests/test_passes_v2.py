@@ -8,7 +8,10 @@ from src.passes.simplify_cfg import (
     unreachable_elim_function,
 )
 from src.tac.interpreter import run
+from src.tac.ir import Program
 from src.tac.parser import parse_program
+
+from .helpers import assert_equiv_on_finite_domain
 
 
 SRC_BRANCH = """
@@ -58,6 +61,30 @@ def test_unreachable_elim():
         assert run(prog, {"a": a}).out == run(Program(function=opt), {"a": a}).out
 
 
+def test_cfg_const_prop_across_blocks():
+    src = """
+func main(i64 a) -> i64
+entry:
+  x = const 2
+  br a, left, right
+
+left:
+  y = add x, 1
+  ret y
+
+right:
+  y = add x, 2
+  ret y
+end
+"""
+    prog = parse_program(src)
+    opt = cfg_const_prop_function(prog.function)
+    text = "\n".join(str(i) for b in opt.blocks.values() for i in b.instructions)
+    assert "y = const 3" in text
+    assert "y = const 4" in text
+    assert_equiv_on_finite_domain(src, cfg_const_prop_function, value_max=3)
+
+
 def test_sccp():
     src = """
 func main(i64 a) -> i64
@@ -82,4 +109,6 @@ end
     assert run(prog, {"a": 0}).out == run(Program(function=opt), {"a": 0}).out
 
 
-from src.tac.ir import Program
+def test_finite_domain_equiv_v2_passes():
+    for pass_fn in (branch_fold_function, unreachable_elim_function, cfg_const_prop_function, sccp_function):
+        assert_equiv_on_finite_domain(SRC_BRANCH, pass_fn, value_max=3)

@@ -1,6 +1,6 @@
 PYTHON = python3
 PYTEST = pytest
-NUCSV_BIN ?= NuSMV
+NUSMV_BIN ?= NuSMV
 
 .PHONY: test run-v1 run-v2 verify-v1 verify-bad lint clean
 
@@ -26,16 +26,16 @@ verify-v1:
 	  --passes const-fold,const-prop,dce \
 	  --value-max 7 --max-steps 32 \
 	  --emit-opt generated/tac/cf_01.opt.tac \
-	  --emit-smv generated/smv/cf_01.smv --run-nusmv
+	  --emit-smv generated/smv/cf_01.smv --run-nusmv --nusmv-bin $(NUSMV_BIN)
 
 verify-bad:
 	$(PYTHON) -m src.cli.run examples/v1_straightline/bad_div_01.tac \
 	  --bad-pass div-self-to-one \
 	  --emit-opt generated/tac/bad_div_01.opt.tac \
-	  --emit-smv generated/smv/bad_div_01.smv --run-nusmv
+	  --emit-smv generated/smv/bad_div_01.smv --run-nusmv --nusmv-bin $(NUSMV_BIN)
 
 lint:
 	find src tests -name '*.py' -exec $(PYTHON) -m py_compile {} +
 
 clean:
-	rm -f generated/tac/*.tac generated/smv/*.smv generated/logs/*.log
+	rm -f generated/tac/*.tac generated/smv/*.smv generated/logs/*.log generated/counterexamples/*.md

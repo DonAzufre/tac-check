@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import pytest
-
 from src.tac.interpreter import run
 from src.tac.ir import ConstInst
 from src.tac.parser import parse_program
 from src.tac.printer import print_program
+
+from .helpers import assert_equiv_on_finite_domain
 
 
 SRC_CF = """
@@ -98,7 +98,7 @@ def test_dce_removes_unused_pure_computation():
     prog = parse_program(SRC_DCE)
     opt = dce_function(prog.function, value_max=7)
     names = [str(inst) for inst in opt.blocks["entry"].instructions]
-    assert "dead = mul" not in names
+    assert not any("dead = mul" in n for n in names)
     assert any("ret t2" in n for n in names)
 
 
@@ -125,3 +125,13 @@ def test_local_cse():
     opt = local_cse_function(prog.function, value_max=7)
     names = [str(inst) for inst in opt.blocks["entry"].instructions]
     assert any("copy t0" in n for n in names)
+
+
+def test_finite_domain_equiv_v1_passes():
+    from src.passes.const_fold import const_fold_function
+    from src.passes.const_prop import const_prop_function
+    from src.passes.dce import dce_function
+    from src.passes.local_cse import local_cse_function
+
+    for pass_fn in (const_fold_function, const_prop_function, dce_function, local_cse_function):
+        assert_equiv_on_finite_domain(SRC_CSE, pass_fn, value_max=3)

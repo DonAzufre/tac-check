@@ -5,6 +5,7 @@ from copy import deepcopy
 from ..tac.ir import (
     BasicBlock,
     BinOpInst,
+    BrInst,
     CmpInst,
     Const,
     ConstInst,
@@ -23,6 +24,12 @@ def _substitute(op: Operand, consts: dict[str, int]) -> Operand:
     return op
 
 
+def _kill_written_const(inst: Instruction, consts: dict[str, int]) -> None:
+    dst = getattr(inst, "dst", None)
+    if dst is not None:
+        consts.pop(dst, None)
+
+
 def _propagate_in_block(block: BasicBlock) -> BasicBlock:
     consts: dict[str, int] = {}
     new_insts: list[Instruction] = []
@@ -30,25 +37,35 @@ def _propagate_in_block(block: BasicBlock) -> BasicBlock:
         new_inst: Instruction
         if isinstance(inst, ConstInst):
             consts[inst.dst] = inst.value
-            new_inst = inst
+            new_inst = deepcopy(inst)
         elif isinstance(inst, CopyInst):
             src = _substitute(inst.src, consts)
             if isinstance(src, Const):
                 consts[inst.dst] = src.value
                 new_inst = ConstInst(dst=inst.dst, value=src.value)
             else:
+                _kill_written_const(inst, consts)
                 new_inst = CopyInst(dst=inst.dst, src=src)
         elif isinstance(inst, BinOpInst):
             left = _substitute(inst.left, consts)
             right = _substitute(inst.right, consts)
+            _kill_written_const(inst, consts)
             new_inst = BinOpInst(dst=inst.dst, op=inst.op, left=left, right=right)
         elif isinstance(inst, NegInst):
             src = _substitute(inst.src, consts)
+            _kill_written_const(inst, consts)
             new_inst = NegInst(dst=inst.dst, src=src)
         elif isinstance(inst, CmpInst):
             left = _substitute(inst.left, consts)
             right = _substitute(inst.right, consts)
+            _kill_written_const(inst, consts)
             new_inst = CmpInst(dst=inst.dst, op=inst.op, left=left, right=right)
+        elif isinstance(inst, BrInst):
+            new_inst = BrInst(
+                cond=_substitute(inst.cond, consts),
+                true_label=inst.true_label,
+                false_label=inst.false_label,
+            )
         else:
             new_inst = deepcopy(inst)
         new_insts.append(new_inst)
@@ -68,6 +85,6 @@ def const_prop_function(func: Function, value_max: int = 7) -> Function:
         new_block = new_func.blocks[label]
         new_block.predecessors = list(block.predecessors)
         new_block.successors = list(block.successors)
-        new_block.instructions = list(block.instructions)
+        new_block.instructions = deepcopy(block.instructions)
         _propagate_in_block(new_block)
     return new_func
