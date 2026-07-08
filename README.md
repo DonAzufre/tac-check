@@ -8,6 +8,7 @@ A course-scale translation-validation project: verify that simple TAC optimizati
 2. Applies optimization passes in Python.
 3. Generates a NuSMV model that runs the source and optimized programs in lock-step on the same nondeterministic inputs.
 4. Checks CTL properties that relate the two programs' final behavior: normal termination, trap, and output value.
+5. Optionally parses NuSMV logs into a Markdown counterexample/verification summary.
 
 **Important:** The verification conclusion is valid only within the finite abstract value domain used by the NuSMV model (default `0..7` with modular arithmetic). It is not a proof for full 64-bit integer semantics.
 
@@ -45,6 +46,12 @@ Run tests:
 make test
 ```
 
+Run syntax-level linting:
+
+```bash
+make lint
+```
+
 ## CLI
 
 ```bash
@@ -67,6 +74,7 @@ Options:
 - `--run-nusmv`: invoke NuSMV and save the log.
 - `--nusmv-bin`: path to the NuSMV executable.
 - `--save-log`: log file path (default `generated/logs/<case>.log`).
+- `--save-summary`: Markdown summary path for parsed NuSMV results (default `generated/counterexamples/<case>.md` when `--run-nusmv` is used).
 
 ## Supported TAC instructions
 
@@ -92,26 +100,39 @@ Same instructions plus:
 - `jmp label`
 - `br cond, label_true, label_false`
 
+The parser validates duplicate labels, undefined branch/jump targets, instructions after terminators, unknown parameters, and variable use before definition.
+
 ## Supported passes
 
 ### v1
 
-- `const-fold`: constant folding
-- `const-prop`: local constant propagation
-- `dce`: dead code elimination
-- `local-cse`: local common subexpression elimination
+- `const-fold`: block-local constant folding with correct invalidation on redefinition.
+- `const-prop`: block-local constant propagation with correct invalidation on redefinition.
+- `dce`: dead code elimination that preserves potentially trapping division/modulo operations.
+- `local-cse`: local common subexpression elimination with operand/result invalidation after writes.
 
 ### v2
 
-- `branch-fold`: fold constant-condition branches
-- `unreachable-elim`: delete unreachable blocks
-- `cfg-cp`: CFG-aware constant propagation
-- `sccp`: simplified sparse conditional constant propagation
+- `branch-fold`: fold constant-condition branches.
+- `unreachable-elim`: delete unreachable blocks.
+- `cfg-cp`: CFG-aware must-constant propagation over predecessor intersections.
+- `sccp`: simplified SCCP-style pipeline (`cfg-cp` + branch folding + unreachable elimination).
 
 ### Bad passes (for counterexamples)
 
 - `div-self-to-one`: incorrectly replaces `x / x` with `1`, causing a mismatch when `x = 0`.
 - `drop-ret-deps`: removes instructions even if they feed into `ret`.
+
+## Testing strategy
+
+Tests include:
+
+- parser/validator checks for malformed TAC;
+- interpreter behavior checks;
+- pass-specific transformation checks;
+- finite-domain differential tests comparing source and optimized interpreter observations;
+- SMV generation regression tests for full input-domain initialization and correct variable prefixing;
+- NuSMV log parser tests.
 
 ## Documentation
 
@@ -122,6 +143,7 @@ See `docs/`:
 - `verification_properties.md`: CTL properties and their meaning.
 - `experiment_record_template.md`: template for recording experiments.
 - `report_outline.md`: suggested report outline.
+- `zh_CN/user_guide.md`: detailed Chinese project guide, architecture notes, verification workflow, and extension guide.
 
 ## Modeling boundaries and limitations
 

@@ -27,6 +27,9 @@ class _ExprKey:
     def __hash__(self) -> int:
         return hash((self.op, self.pair))
 
+    def depends_on(self, name: str) -> bool:
+        return name in self.pair
+
 
 def _operand_name(op) -> str | None:
     if isinstance(op, Const):
@@ -38,6 +41,12 @@ def _operand_name(op) -> str | None:
     return None
 
 
+def _invalidate_written_var(avail: dict[_ExprKey, str], dst: str) -> None:
+    stale = [key for key, value in avail.items() if value == dst or key.depends_on(dst)]
+    for key in stale:
+        del avail[key]
+
+
 def local_cse_block(block: BasicBlock) -> BasicBlock:
     avail: dict[_ExprKey, str] = {}
     new_insts: list[Instruction] = []
@@ -47,10 +56,20 @@ def local_cse_block(block: BasicBlock) -> BasicBlock:
             right = _operand_name(inst.right)
             if left is not None and right is not None:
                 key = _ExprKey(inst.op, left, right)
-                if key in avail:
-                    new_insts.append(CopyInst(dst=inst.dst, src=Var(avail[key])))
+                replacement = avail.get(key)
+                _invalidate_written_var(avail, inst.dst)
+                if replacement is not None:
+                    new_insts.append(CopyInst(dst=inst.dst, src=Var(replacement)))
+                    if not key.depends_on(inst.dst):
+                        avail[key] = inst.dst
                     continue
-                avail[key] = inst.dst
+                new_insts.append(inst)
+                if not key.depends_on(inst.dst):
+                    avail[key] = inst.dst
+                continue
+        dst = getattr(inst, "dst", None)
+        if dst is not None:
+            _invalidate_written_var(avail, dst)
         new_insts.append(inst)
     block.instructions = new_insts
     return block

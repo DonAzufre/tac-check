@@ -25,14 +25,21 @@ def _smv_id(name: str) -> str:
     return name.replace(".", "_")
 
 
-def _operand_smv(op: Operand) -> str:
+def _operand_smv(op: Operand, prefix: str | None = None) -> str:
     if isinstance(op, Const):
         return str(op.value)
-    if isinstance(op, Var):
-        return _smv_id(op.name)
     if isinstance(op, Param):
         return _smv_id(op.name)
+    if isinstance(op, Var):
+        base = _smv_id(op.name)
+        if prefix is None:
+            return base
+        return f"{prefix}_{base}"
     raise ValueError(f"unknown operand {op}")
+
+
+def _value_domain_smv(value_max: int) -> str:
+    return "{" + ", ".join(str(i) for i in range(value_max + 1)) + "}"
 
 
 def _declare_var(name: str, value_max: int) -> str:
@@ -91,7 +98,31 @@ def _flatten_with_labels(func: Function) -> tuple[list[tuple[int, Instruction]],
     return flat, label_map
 
 
+def _inst_expr_smv(prefix: str, inst: Instruction, mod: int) -> str | None:
+    if isinstance(inst, ConstInst):
+        return str(inst.value)
+    if isinstance(inst, CopyInst):
+        return _operand_smv(inst.src, prefix)
+    if isinstance(inst, BinOpInst):
+        left = _operand_smv(inst.left, prefix)
+        right = _operand_smv(inst.right, prefix)
+        return _binop_smv(inst.op, left, right, mod)
+    if isinstance(inst, NegInst):
+        src = _operand_smv(inst.src, prefix)
+        return f"({mod} - {src}) mod {mod}"
+    if isinstance(inst, CmpInst):
+        left = _operand_smv(inst.left, prefix)
+        right = _operand_smv(inst.right, prefix)
+        return _cmp_smv(inst.op, left, right)
+    return None
+
+
 def generate_smv(source: Function, optimized: Function, value_max: int, max_steps: int) -> str:
+    if value_max < 0:
+        raise ValueError("value_max must be non-negative")
+    if max_steps < 0:
+        raise ValueError("max_steps must be non-negative")
+
     mod = value_max + 1
     src_flat, src_labels = _flatten_with_labels(source)
     opt_flat, opt_labels = _flatten_with_labels(optimized)
@@ -142,8 +173,9 @@ def generate_smv(source: Function, optimized: Function, value_max: int, max_step
     lines.append("  init(opt_out) := 0;")
     lines.append("  init(src_timeout) := FALSE;")
     lines.append("  init(opt_timeout) := FALSE;")
+    domain = _value_domain_smv(value_max)
     for p in params:
-        lines.append(f"  init({_smv_id(p)}) := {{0,{value_max}}};")
+        lines.append(f"  init({_smv_id(p)}) := {domain};")
     for v in src_vars:
         lines.append(f"  init(src_{_smv_id(v)}) := 0;")
     for v in opt_vars:
@@ -158,8 +190,6 @@ def generate_smv(source: Function, optimized: Function, value_max: int, max_step
         prefix: str,
         flat: list[tuple[int, Instruction]],
         labels: dict[str, int],
-        other_done: str,
-        other_trap: str,
     ) -> list[str]:
         n = len(flat)
         out: list[str] = []
@@ -173,11 +203,7 @@ def generate_smv(source: Function, optimized: Function, value_max: int, max_step
                 target = labels.get(inst.label, n)
                 out.append(f"      {prefix}_pc = {idx} : {target};")
             elif isinstance(inst, BrInst):
-                cond = _operand_smv(inst.cond)
-                if isinstance(inst.cond, Var):
-                    cond = f"{prefix}_{_smv_id(cond)}"
-                elif isinstance(inst.cond, Param):
-                    cond = _smv_id(cond)
+                cond = _operand_smv(inst.cond, prefix)
                 target_t = labels.get(inst.true_label, n)
                 target_f = labels.get(inst.false_label, n)
                 out.append(
@@ -203,7 +229,7 @@ def generate_smv(source: Function, optimized: Function, value_max: int, max_step
         out.append(f"      {prefix}_trap : TRUE;")
         for idx, inst in flat:
             if isinstance(inst, BinOpInst) and inst.op in ("div", "mod"):
-                right = _operand_smv(inst.right)
+                right = _operand_smv(inst.right, prefix)
                 out.append(f"      {prefix}_pc = {idx} & {right} = 0 : TRUE;")
         out.append("      TRUE : FALSE;")
         out.append("    esac;")
@@ -213,11 +239,7 @@ def generate_smv(source: Function, optimized: Function, value_max: int, max_step
         out.append(f"      {prefix}_done : {prefix}_out;")
         for idx, inst in flat:
             if isinstance(inst, RetInst):
-                srcv = _operand_smv(inst.src)
-                if isinstance(inst.src, Var):
-                    srcv = f"{prefix}_{_smv_id(srcv)}"
-                elif isinstance(inst.src, Param):
-                    srcv = _smv_id(srcv)
+                srcv = _operand_smv(inst.src, prefix)
                 out.append(f"      {prefix}_pc = {idx} : {srcv};")
         out.append(f"      {prefix}_pc = {n} : {prefix}_out;")
         out.append("      TRUE : 0;")
@@ -241,8 +263,8 @@ def generate_smv(source: Function, optimized: Function, value_max: int, max_step
 
         return out
 
-    lines.extend(_gen_program("src", src_flat, src_labels, "opt_done", "opt_trap"))
-    lines.extend(_gen_program("opt", opt_flat, opt_labels, "src_done", "src_trap"))
+    lines.extend(_gen_program("src", src_flat, src_labels))
+    lines.extend(_gen_program("opt", opt_flat, opt_labels))
 
     # variable updates
     def _gen_var_updates(prefix: str, flat: list[tuple[int, Instruction]], vars_: list[str]) -> list[str]:
@@ -255,50 +277,7 @@ def generate_smv(source: Function, optimized: Function, value_max: int, max_step
             for idx, inst in flat:
                 dst = getattr(inst, "dst", None)
                 if dst == v:
-                    expr: str | None = None
-                    if isinstance(inst, ConstInst):
-                        expr = str(inst.value)
-                    elif isinstance(inst, CopyInst):
-                        expr = _operand_smv(inst.src)
-                    elif isinstance(inst, BinOpInst):
-                        left = _operand_smv(inst.left)
-                        if isinstance(inst.left, Var):
-                            left = f"{prefix}_{_smv_id(left)}"
-                        elif isinstance(inst.left, Param):
-                            left = _smv_id(left)
-                        right = _operand_smv(inst.right)
-                        if isinstance(inst.right, Var):
-                            right = f"{prefix}_{_smv_id(right)}"
-                        elif isinstance(inst.right, Param):
-                            right = _smv_id(right)
-                        expr = _binop_smv(inst.op, left, right, mod)
-                    elif isinstance(inst, NegInst):
-                        src = _operand_smv(inst.src)
-                        if isinstance(inst.src, Var):
-                            src = f"{prefix}_{_smv_id(src)}"
-                        elif isinstance(inst.src, Param):
-                            src = _smv_id(src)
-                        expr = f"({mod} - {src}) mod {mod}"
-                    elif isinstance(inst, CmpInst):
-                        left = _operand_smv(inst.left)
-                        if isinstance(inst.left, Var):
-                            left = f"{prefix}_{_smv_id(left)}"
-                        elif isinstance(inst.left, Param):
-                            left = _smv_id(left)
-                        right = _operand_smv(inst.right)
-                        if isinstance(inst.right, Var):
-                            right = f"{prefix}_{_smv_id(right)}"
-                        elif isinstance(inst.right, Param):
-                            right = _smv_id(right)
-                        expr = _cmp_smv(inst.op, left, right)
-                    elif isinstance(inst, CopyInst):
-                        src = _operand_smv(inst.src)
-                        if isinstance(inst.src, Var):
-                            expr = f"{prefix}_{_smv_id(src)}"
-                        elif isinstance(inst.src, Param):
-                            expr = _smv_id(src)
-                        else:
-                            expr = src
+                    expr = _inst_expr_smv(prefix, inst, mod)
                     if expr is not None:
                         writes.append((idx, expr))
             for idx, expr in writes:

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -17,9 +16,10 @@ from ..passes.simplify_cfg import (
     sccp_function,
     unreachable_elim_function,
 )
+from ..smv.log_parser import write_markdown_summary
 from ..smv.smvgen import generate_smv_program
 from ..tac.ir import Program
-from ..tac.parser import parse_program
+from ..tac.parser import ParseError, parse_program
 from ..tac.printer import print_program
 
 
@@ -44,7 +44,7 @@ def _ensure_dir(path: str) -> None:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
 
 
-def _run_nusmv(smv_path: str, log_path: str, nusmv_bin: str) -> None:
+def _run_nusmv(smv_path: str, log_path: str, nusmv_bin: str) -> int:
     try:
         result = subprocess.run(
             [nusmv_bin, smv_path],
@@ -59,13 +59,14 @@ def _run_nusmv(smv_path: str, log_path: str, nusmv_bin: str) -> None:
         print(f"NuSMV output saved to {log_path}")
         if result.returncode != 0:
             print(f"NuSMV exited with code {result.returncode}")
+        return result.returncode
     except FileNotFoundError:
         print(
             f"NuSMV binary '{nusmv_bin}' not found. "
             "Install NuSMV or pass --nusmv-bin to run verification.",
             file=sys.stderr,
         )
-        sys.exit(2)
+        return 2
 
 
 def _parse_args() -> argparse.Namespace:
@@ -80,14 +81,25 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--run-nusmv", action="store_true", help="Run NuSMV after generation")
     parser.add_argument("--nusmv-bin", default="NuSMV", help="NuSMV executable name/path")
     parser.add_argument("--save-log", help="NuSMV log path")
+    parser.add_argument(
+        "--save-summary",
+        help="Markdown summary path for parsed NuSMV results; defaults to generated/counterexamples/<case>.md when --run-nusmv is used",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = _parse_args()
-    with open(args.input, "r") as f:
-        source_text = f.read()
-    source = parse_program(source_text, value_max=args.value_max)
+    try:
+        with open(args.input, "r") as f:
+            source_text = f.read()
+        source = parse_program(source_text, value_max=args.value_max)
+    except OSError as exc:
+        print(f"Cannot read input: {exc}", file=sys.stderr)
+        return 1
+    except ParseError as exc:
+        print(f"Parse error: {exc}", file=sys.stderr)
+        return 1
 
     optimized = source
     for name in [p.strip() for p in args.passes.split(",") if p.strip()]:
@@ -126,7 +138,14 @@ def main() -> int:
         log_path = args.save_log or (
             f"generated/logs/{Path(args.input).stem}.log"
         )
-        _run_nusmv(args.emit_smv, log_path, args.nusmv_bin)
+        returncode = _run_nusmv(args.emit_smv, log_path, args.nusmv_bin)
+        if returncode == 0:
+            summary_path = args.save_summary or (
+                f"generated/counterexamples/{Path(args.input).stem}.md"
+            )
+            write_markdown_summary(log_path, summary_path)
+            print(f"NuSMV markdown summary written to {summary_path}")
+        return returncode
 
     return 0
 

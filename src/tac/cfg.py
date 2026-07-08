@@ -7,7 +7,7 @@ def reachable_labels(func: Function) -> set[str]:
     reachable: set[str] = set()
 
     def dfs(label: str) -> None:
-        if label in reachable:
+        if label in reachable or label not in func.blocks:
             return
         reachable.add(label)
         for succ in func.blocks[label].successors:
@@ -18,12 +18,17 @@ def reachable_labels(func: Function) -> set[str]:
 
 
 def topological_labels(func: Function) -> list[str]:
-    """Return a topological order of reachable blocks (assumes loop-free CFG)."""
+    """Return a DFS postorder-derived order of reachable blocks.
+
+    The project still assumes loop-free v2 examples for precise CFG data-flow.  This
+    helper tolerates cycles by not revisiting blocks; loop handling remains bounded by
+    the interpreter/model max-step controls.
+    """
     visited: set[str] = set()
     order: list[str] = []
 
     def dfs(label: str) -> None:
-        if label in visited:
+        if label in visited or label not in func.blocks:
             return
         visited.add(label)
         for succ in func.blocks[label].successors:

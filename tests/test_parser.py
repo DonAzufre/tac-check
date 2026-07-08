@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from src.tac.parser import parse_program
+import pytest
+
+from src.tac.parser import ParseError, parse_program
 
 
 def test_parse_straightline():
@@ -40,8 +42,6 @@ end
 
 
 def test_constant_reduction_warning():
-    import warnings
-
     src = """
 func main(i64 a) -> i64
   t0 = const 10
@@ -52,4 +52,46 @@ end
         parse_program(src, value_max=7)
 
 
-import pytest
+def test_parse_rejects_unknown_label():
+    src = """
+func main(i64 a) -> i64
+  jmp missing
+end
+"""
+    with pytest.raises(ParseError, match="undefined label"):
+        parse_program(src)
+
+
+def test_parse_rejects_instruction_after_terminator():
+    src = """
+func main(i64 a) -> i64
+  ret a
+  t0 = const 1
+end
+"""
+    with pytest.raises(ParseError, match="after terminator"):
+        parse_program(src)
+
+
+def test_parse_rejects_use_before_definition():
+    src = """
+func main(i64 a) -> i64
+  t0 = add missing, a
+  ret t0
+end
+"""
+    with pytest.raises(ParseError, match="before definition"):
+        parse_program(src)
+
+
+def test_parse_rejects_duplicate_label():
+    src = """
+func main(i64 a) -> i64
+L:
+  t0 = const 1
+L:
+  ret t0
+end
+"""
+    with pytest.raises(ParseError, match="duplicate label"):
+        parse_program(src)

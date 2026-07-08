@@ -10,6 +10,7 @@ from ..tac.ir import (
     Function,
     Instruction,
     NegInst,
+    Operand,
     Var,
 )
 
@@ -51,20 +52,15 @@ def const_fold_function(func: Function, value_max: int = 7) -> Function:
         entry=func.entry,
         blocks={label: block.__class__(label=block.label) for label, block in func.blocks.items()},
     )
-    consts: dict[str, int] = {}
     for label in func.ordered_block_labels():
         block = func.blocks[label]
         new_block = new_func.blocks[label]
         new_block.predecessors = list(block.predecessors)
         new_block.successors = list(block.successors)
+        consts: dict[str, int] = {}
         for inst in block.instructions:
             new_inst = _fold_instruction(inst, mod, consts)
-            if isinstance(new_inst, ConstInst):
-                consts[new_inst.dst] = new_inst.value
-            elif isinstance(new_inst, CopyInst):
-                src_val = _operand_to_const(new_inst.src, consts)
-                if src_val is not None:
-                    consts[new_inst.dst] = src_val
+            _update_consts_after(new_inst, consts)
             new_block.instructions.append(new_inst)
     return new_func
 
@@ -77,13 +73,25 @@ def _operand_to_const(op, consts: dict[str, int]) -> int | None:
     return None
 
 
+def _update_consts_after(inst: Instruction, consts: dict[str, int]) -> None:
+    dst = getattr(inst, "dst", None)
+    if dst is None:
+        return
+    if isinstance(inst, ConstInst):
+        consts[dst] = inst.value
+    elif isinstance(inst, CopyInst):
+        src_val = _operand_to_const(inst.src, consts)
+        if src_val is not None:
+            consts[dst] = src_val
+        else:
+            consts.pop(dst, None)
+    else:
+        consts.pop(dst, None)
+
+
 def _fold_instruction(inst: Instruction, mod: int, consts: dict[str, int]) -> Instruction:
     def to_const(op):
-        if isinstance(op, Const):
-            return op.value
-        if isinstance(op, Var) and op.name in consts:
-            return consts[op.name]
-        return None
+        return _operand_to_const(op, consts)
 
     if isinstance(inst, BinOpInst):
         left = to_const(inst.left)
